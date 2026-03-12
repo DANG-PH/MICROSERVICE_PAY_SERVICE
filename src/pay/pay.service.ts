@@ -13,12 +13,16 @@ import {
 } from 'proto/pay.pb';
 import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
+import { winstonLogger } from 'src/logger/logger.config';
+import { FinanceService } from 'src/finance/finance.service';
 
 @Injectable()
 export class PayService {
   constructor(
     @InjectRepository(Pay)
     private readonly payRepository: Repository<Pay>,
+
+    private readonly financeService: FinanceService,
   ) {}
 
   async getPayByUserId(data: GetPayByUserIdRequest): Promise<PayResponse> {
@@ -97,7 +101,71 @@ export class PayService {
     const pay = await this.payRepository.findOne({ where: { userId: data.userId } });
     if (!pay) throw new RpcException({code: status.NOT_FOUND ,message: 'Không tìm thấy ví của user'});
     if (data.amount < 0) throw new RpcException({code: status.INVALID_ARGUMENT ,message: 'Số tiền không hợp lệ'});
-    const qr = `https://img.vietqr.io/image/vietinbank-0396436954-XsnUkVz.jpg?amount=${data.amount}&addInfo=HDG%STUDIO${data.userId}%${data.username}%${data.amount}&accountName=Pham+Hai+Dang`;
+    const addInfo = encodeURIComponent(`HDG STUDIO ${data.userId} ${data.username} ${data.amount}`);
+    const qr = `https://img.vietqr.io/image/vietinbank-0396436954-XsnUkVz.jpg?amount=${data.amount}&addInfo=${addInfo}&accountName=Pham+Hai+Dang`;
     return { qr: qr, username: data.username };
+  }
+
+  async handleCassoTransaction(body: any): Promise<void> {
+    try {
+      const data = body?.data;
+      if (!data || typeof data !== 'object') {
+        console.log('❌ Webhook không có dữ liệu giao dịch hoặc sai cấu trúc.');
+        return;
+      }
+
+      const { description, id: tid, amount, reference, transactionDateTime } = data;
+      console.log(`📩 Nhận giao dịch ${tid}: ND: ${description}`);
+
+      if (!description) {
+        console.log('⚠️ Thiếu nội dung giao dịch.');
+        return;
+      }
+
+      // ✅ Chuẩn hóa ND
+      const normalized = description.replace(/%/g, ' ').trim();
+      const parts = normalized.split(/\s+/);
+      const studioIndex = parts.findIndex(p => p.toUpperCase() === 'STUDIO');
+
+      // Format phải có ít nhất 5 phần tử: ["HDG", "STUDIO", "1", "dang123", "50000"]
+      if (studioIndex === -1 || parts.length < studioIndex + 4) {
+        console.log(`⚠️ ND thiếu dữ liệu hợp lệ sau 'STUDIO': ${description}`);
+        return;
+      }
+
+      // ✅ Lấy 3 phần tử sau cùng
+      const userId = parseInt(parts[studioIndex + 1]);
+      const username = parts[studioIndex + 2];
+      // const inputAmount = parseInt(parts[studioIndex + 3]);
+      const inputAmount = amount;
+
+      if (isNaN(userId) || isNaN(inputAmount)) {
+        console.log(`⚠️ Dữ liệu không hợp lệ (ID hoặc số tiền): ${description}`);
+        return;
+      }
+
+      // ✅ Gọi updateMoney
+      const request: UpdateMoneyRequest = {
+        userId,
+        amount: inputAmount,
+      };
+
+      await this.updateMoney(request);
+      await this.financeService.createFinanceRecord({
+        user_id: userId,
+        type: "NAP",
+        amount: inputAmount
+      }) 
+
+      winstonLogger.log({ nhiemVu: 'thongBaoNapTien', username: username, amount: inputAmount })
+
+      console.log(`✅ Đã cộng ${inputAmount}đ cho userId ${userId} (username: ${username})`);
+    } catch (error) {
+      console.log('❌ Lỗi khi xử lý webhook Casso:', error);
+      throw new RpcException({
+        code: status.INTERNAL,
+        message: 'Lỗi xử lý webhook',
+      });
+    }
   }
 }
