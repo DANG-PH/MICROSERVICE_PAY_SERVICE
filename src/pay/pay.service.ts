@@ -112,19 +112,19 @@ export class PayService {
     try {
       const data = body?.data;
       if (!data || typeof data !== 'object') {
-        console.log('❌ Webhook không có dữ liệu giao dịch hoặc sai cấu trúc.');
+        console.log('Webhook không có dữ liệu giao dịch hoặc sai cấu trúc.');
         return;
       }
 
       const { description, id: tid, amount, reference, transactionDateTime } = data;
-      console.log(`📩 Nhận giao dịch ${tid}: ND: ${description}`);
+      console.log(`Nhận giao dịch ${tid}: ND: ${description}`);
 
       if (!description) {
         console.log('⚠️ Thiếu nội dung giao dịch.');
         return;
       }
 
-      // ✅ Chuẩn hóa ND
+      // Chuẩn hóa ND
       const normalized = description.replace(/%/g, ' ').trim();
       const parts = normalized.split(/\s+/);
       const studioIndex = parts.findIndex(p => p.toUpperCase() === 'STUDIO');
@@ -135,7 +135,7 @@ export class PayService {
         return;
       }
 
-      // ✅ Lấy 3 phần tử sau cùng
+      // Lấy 3 phần tử sau cùng
       const userId = parseInt(parts[studioIndex + 1]);
       const username = parts[studioIndex + 2];
       // const inputAmount = parseInt(parts[studioIndex + 3]);
@@ -146,7 +146,7 @@ export class PayService {
         return;
       }
 
-      // ✅ Gọi updateMoney
+      // Gọi updateMoney
       const request: UpdateMoneyRequest = {
         userId,
         amount: inputAmount,
@@ -161,9 +161,9 @@ export class PayService {
 
       winstonLogger.log({ nhiemVu: 'thongBaoNapTien', username: username, amount: inputAmount })
 
-      console.log(`✅ Đã cộng ${inputAmount}đ cho userId ${userId} (username: ${username})`);
+      console.log(`Đã cộng ${inputAmount}đ cho userId ${userId} (username: ${username})`);
     } catch (error) {
-      console.log('❌ Lỗi khi xử lý webhook Casso:', error);
+      console.log('Lỗi khi xử lý webhook Casso:', error);
       throw new RpcException({
         code: status.INTERNAL,
         message: 'Lỗi xử lý webhook',
