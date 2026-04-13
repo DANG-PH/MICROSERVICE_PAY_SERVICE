@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn, UpdateDateColumn, Index } from 'typeorm';
 
 @Entity('pay')
 export class Pay {
@@ -8,7 +8,7 @@ export class Pay {
   @Column({ default: '0' })
   tien: string;
 
-  @Column()
+  @Column({ unique: true }) // Unique Index
   userId: number;
 
   @Column({ default: 'open' })

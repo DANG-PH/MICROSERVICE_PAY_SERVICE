@@ -1,10 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
 
 @Entity('cash-flow-management')
 export class Finance {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Index()
   @Column({ nullable: false })
   user_id: number;
 
