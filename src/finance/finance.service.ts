@@ -19,7 +19,7 @@ export class FinanceService {
   // ===== Tạo bản ghi giao dịch =====
   async createFinanceRecord(payload: CreateFinanceRequest): Promise<FinanceResponse> {
     const newRecord = this.financeRepository.create({
-      user_id: payload.user_id,
+      userId: payload.userId,
       type: payload.type,
       amount: payload.amount,
       create_at: new Date(),
@@ -37,7 +37,7 @@ export class FinanceService {
 
   // ===== Lấy giao dịch theo user =====
   async getFinanceByUser(payload: GetFinanceByUserRequest): Promise<ListFinanceResponse> {
-    const finances = await this.financeRepository.find({ where: { user_id: payload.user_id } });
+    const finances = await this.financeRepository.find({ where: { userId: payload.userId } });
     const mappedFinances = finances.map(fin => ({
       ...fin,
       create_at: fin.create_at.toISOString(),

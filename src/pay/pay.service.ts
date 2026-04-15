@@ -261,7 +261,7 @@ export class PayService {
 
       await this.updateMoney(request);
       await this.financeService.createFinanceRecord({
-        user_id: userId,
+        userId: userId,
         type: "NAP",
         amount: inputAmount
       }) 

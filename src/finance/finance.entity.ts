@@ -7,7 +7,7 @@ export class Finance {
 
   @Index()
   @Column({ nullable: false })
-  user_id: number;
+  userId: number;
 
   @Column({ nullable: false })
   type: string; // NAP hoặc RUT , thao tác với dòng tiền 
