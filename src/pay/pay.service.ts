@@ -15,12 +15,15 @@ import { status } from '@grpc/grpc-js';
 import { RpcException } from '@nestjs/microservices';
 import { winstonLogger } from 'src/logger/logger.config';
 import { FinanceService } from 'src/finance/finance.service';
+import { IdempotencyKey } from './idempotency.entity';
 
 @Injectable()
 export class PayService {
   constructor(
     @InjectRepository(Pay)
     private readonly payRepository: Repository<Pay>,
+    @InjectRepository(IdempotencyKey)
+    private readonly idempotencyRepository: Repository<IdempotencyKey>,
 
     private readonly financeService: FinanceService,
   ) {}
@@ -38,25 +41,128 @@ export class PayService {
   }
 
   async updateMoney(data: UpdateMoneyRequest): Promise<PayResponse> {
-    const pay = await this.payRepository.findOne({ where: { userId: data.userId } });
-    if (!pay) throw new RpcException({code: status.NOT_FOUND ,message: 'Không tìm thấy ví của user'});
-    if (pay.status === 'locked') throw new RpcException({code: status.PERMISSION_DENIED ,message: 'ví của bạn đã bị khóa'});
+    const key = data.idempotencyKey;
 
-    const currentMoney = parseInt(pay.tien);
-    const newMoney = currentMoney + Number(data.amount);
-    if (newMoney < 0) throw new RpcException({code: status.INVALID_ARGUMENT ,message: 'Số tiền không hợp lệ'});
+    if (!key) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Thiếu idempotency key',
+      });
+    }
 
-    pay.tien = newMoney.toString();
-    pay.updatedAt = new Date();
-    await this.payRepository.save(pay);
+    return await this.payRepository.manager.transaction(
+      'READ COMMITTED',
+      async (manager) => {
+        /**
+         * STEP 1: claim key trước
+         * nếu duplicate thì request trước đã tạo row
+         */
+        try {
+          await manager.insert(IdempotencyKey, {
+            key,
+            response: null,
+            created_at: new Date(),
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h
+          });
+        } catch (err) {
+          // duplicate key => bỏ qua
+        }
 
-    return { 
-        pay: {
+        /**
+         * STEP 2: lock row idempotency
+         * request cùng key khác sẽ phải chờ
+         */
+        const idem = await manager.findOne(IdempotencyKey, {
+          where: { key },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!idem) {
+          throw new RpcException({
+            code: status.INTERNAL,
+            message: 'Không tìm thấy idempotency key',
+          });
+        }
+
+        /**
+         * STEP 3: nếu đã xử lý trước đó -> trả cached response
+         */
+        if (idem.response) {
+          return idem.response as PayResponse;
+        }
+
+        /**
+         * STEP 4: lock ví user
+         */
+        const pay = await manager.findOne(Pay, {
+          where: { userId: data.userId },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!pay) {
+          throw new RpcException({
+            code: status.NOT_FOUND,
+            message: 'Không tìm thấy ví của user',
+          });
+        }
+
+        if (pay.status === 'locked') {
+          throw new RpcException({
+            code: status.PERMISSION_DENIED,
+            message: 'Ví của bạn đã bị khóa',
+          });
+        }
+
+        /**
+         * STEP 5: tính số dư mới
+         */
+        const currentMoney = Number(pay.tien);
+        const delta = Number(data.amount);
+
+        if (!Number.isFinite(currentMoney) || !Number.isFinite(delta)) {
+          throw new RpcException({
+            code: status.INVALID_ARGUMENT,
+            message: 'Giá trị tiền không hợp lệ',
+          });
+        }
+
+        const newMoney = currentMoney + delta;
+
+        if (newMoney < 0) {
+          throw new RpcException({
+            code: status.FAILED_PRECONDITION,
+            message: 'Số dư không đủ',
+          });
+        }
+
+        /**
+         * STEP 6: update ví
+         */
+        pay.tien = String(newMoney);
+        pay.updatedAt = new Date();
+
+        await manager.save(Pay, pay);
+
+        /**
+         * STEP 7: build response
+         */
+        const response: PayResponse = {
+          pay: {
             ...pay,
-            updatedAt: pay.updatedAt.toISOString(), 
-        },
-        message: 'Cập nhật số dư thành công'
-    };
+            updatedAt: pay.updatedAt.toISOString(),
+          },
+          message: 'Cập nhật số dư thành công',
+        };
+
+        /**
+         * STEP 8: cache response vào idempotency row
+         */
+        idem.response = response;
+        await manager.save(IdempotencyKey, idem);
+
+        return response;
+      },
+    );
   }
 
   async updateStatus(data: UpdateStatusRequest): Promise<PayResponse> {
@@ -150,6 +256,7 @@ export class PayService {
       const request: UpdateMoneyRequest = {
         userId,
         amount: inputAmount,
+        idempotencyKey: tid
       };
 
       await this.updateMoney(request);

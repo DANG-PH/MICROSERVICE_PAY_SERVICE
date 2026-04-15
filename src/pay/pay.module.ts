@@ -5,9 +5,10 @@ import { PayService } from './pay.service';
 import { PayController } from './pay.controller';
 import { PayRestController } from './payrest.controller';
 import { FinanceModule } from 'src/finance/finance.module';
+import { IdempotencyKey } from './idempotency.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Pay]),FinanceModule], 
+  imports: [TypeOrmModule.forFeature([Pay, IdempotencyKey]),FinanceModule], 
   providers: [PayService],
   controllers: [PayController, PayRestController],
   exports: [PayService], // nếu muốn dùng ở module khác
